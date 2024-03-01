@@ -21,11 +21,11 @@ const userSchema = mongoose.Schema({
 }, {
   toJSON: {
     transform: function (doc, ret) {
-      ret._id = ret._id
       delete ret.__v
     }
   }
 })
+
 const exerciseSchema = mongoose.Schema({
   user_id: String,
   description: String,
@@ -37,11 +37,11 @@ const User = mongoose.model("user", userSchema);
 const Exercise = mongoose.model("exercise", exerciseSchema);
 
 
-async function addExercis({ _id, description, duration, date }) {
-  const user = await User.findById(_id, { username: 1, _id: 1}).exec()
-  if(!user){return {error:"Invalid id"}}
+async function addExercise({ _id, description, duration, date }) {
+  const user = await User.findById(_id, { username: 1, _id: 1 }).exec()
+  if (!user) { return { error: "Invalid id", id: _id } }
   const userObject = user.toObject();
-  date = date?new Date(date):new Date();
+  date = date ? new Date(date) : new Date();
   duration = Number(duration);
   const exercise = new Exercise({
     user_id: userObject._id,
@@ -53,17 +53,17 @@ async function addExercis({ _id, description, duration, date }) {
     await exercise.save()
   }
   catch {
-    console.error("Error while saving the exercis");
+    console.error("Error while saving the exercise");
     return;
   }
-  userObject.description = description;
-  userObject.duration = duration;
-  userObject.date = date;
-  return userObject;
+  if (!description || !duration) {
+    return { error: "empty required felid" + (!description ? " description" : "") + (!duration ? " duration" : "") }
+  }
+  return { ...userObject, ...{ description, duration, date: date.toDateString() } };
 }
 
 async function addUser(username) {
-  // usernames are not uniqe
+  // usernames are not unique
   let user = new User({ username });
   try {
     await user.save()
@@ -75,6 +75,7 @@ async function addUser(username) {
 }
 
 async function getLog({ user_id, from, to, limit }) {
+
   const user = await User.findById(user_id, { username: 1, _id: 1, }).exec()
   if (!user) { return { error: "Invalid id" } }
   const userObject = user.toObject();
@@ -100,40 +101,42 @@ async function getLog({ user_id, from, to, limit }) {
   return userObject
 }
 
+// logger
 app.use("/", (req, res, next) => {
-  console.log(req.method, req.hostname, req.ip, req.query);
+  console.log(`${req.method} ${req.path}\n ├───from: ${req.ip} ${req.hostname}\n └───body:`, req.body);
   next();
 })
+
 
 app.get('/', (req, res) => {
   res.sendFile(__dirname + '/views/index.html')
 });
 
+// add new user
+app.post("/api/users", async function (req, res) {
+  let user = await addUser(req.body.username);
+  res.json(user);
+})
+
+// show all users
+app.get("/api/users", async (req, res) => {
+  let users = await User.find({}).exec();
+  res.json(users);
+})
+
+// add new exercises
 app.post("/api/users/:_id/exercises", async function (req, res) {
-  let exercise = await addExercis(req.body);
-  res.json(exercise);
+  const response = await addExercise({ _id: req.params._id, ...req.body });
+  res.json(response);
 })
 
 
+// show user log
 app.get("/api/users/:_id/logs?", async function (req, res) {
-  const user_id = req.params._id;
-  const from = req.query.from;
-  const to = req.query.to;
-  const limit = req.query.limit;
-  let log = await getLog({ user_id, from, to, limit });
+  let log = await getLog({ user_id: req.params._id, ...req.query });
   res.json(log);
 })
 
-app.use("/api/users", async function (req, res) {
-  if (req.method === "POST") {
-    let user = await addUser(req.body.username);
-    res.json(user);
-  }
-  else if (req.method === "GET") {
-    let users = await User.find({}).exec();
-    res.json(users);
-  }
-})
 
 const listener = app.listen(process.env.PORT || 3000, () => {
   console.log('Your app is listening on port ' + listener.address().port)
